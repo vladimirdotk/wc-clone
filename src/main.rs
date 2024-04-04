@@ -1,6 +1,6 @@
 use std::{
     fs::File,
-    io::{BufRead, BufReader},
+    io::{BufRead, BufReader, Read},
     os::unix::fs::MetadataExt,
     path::Path,
 };
@@ -21,6 +21,7 @@ fn main() {
     match count_mode {
         CountMode::Bytes => count_bytes(file_path),
         CountMode::Lines => count_lines(file_path),
+        CountMode::Words => count_words(file_path),
         _ => (),
     }
 }
@@ -92,6 +93,34 @@ fn count_lines(file_path: &Path) {
                 BufReader::new(file).lines().count(),
                 file_path.to_str().unwrap(),
             );
+        }
+        Err(e) => {
+            println!("Failed to open file: {:?}", e);
+        }
+    }
+}
+
+fn count_words(file_path: &Path) {
+    match File::open(file_path) {
+        Ok(file) => {
+            let mut count = 0;
+            let mut in_word = false;
+
+            for byte in BufReader::new(file).bytes() {
+                match byte.unwrap() {
+                    b' ' | b'\n' | b'\r' | b'\t' => {
+                        if in_word {
+                            count += 1;
+                            in_word = false;
+                        }
+                    }
+                    _ => {
+                        in_word = true;
+                    }
+                }
+            }
+
+            println!("  {} {}", count, file_path.to_str().unwrap(),);
         }
         Err(e) => {
             println!("Failed to open file: {:?}", e);
