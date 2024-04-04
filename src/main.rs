@@ -1,4 +1,9 @@
-use std::{fs::File, os::unix::fs::MetadataExt, path::Path};
+use std::{
+    fs::File,
+    io::{BufRead, BufReader},
+    os::unix::fs::MetadataExt,
+    path::Path,
+};
 
 use clap::{Arg, ArgAction, ArgMatches, Command};
 
@@ -13,8 +18,10 @@ fn main() {
     let args = args();
     let count_mode = count_mode(&args);
     let file_path = Path::new(args.get_one::<String>("file").unwrap());
-    if let CountMode::Bytes = count_mode {
-        count_bytes(file_path)
+    match count_mode {
+        CountMode::Bytes => count_bytes(file_path),
+        CountMode::Lines => count_lines(file_path),
+        _ => (),
     }
 }
 
@@ -68,6 +75,21 @@ fn count_bytes(file_path: &Path) {
             println!(
                 "  {} {}",
                 file.metadata().unwrap().size(),
+                file_path.to_str().unwrap(),
+            );
+        }
+        Err(e) => {
+            println!("Failed to open file: {:?}", e);
+        }
+    }
+}
+
+fn count_lines(file_path: &Path) {
+    match File::open(file_path) {
+        Ok(file) => {
+            println!(
+                "  {} {}",
+                BufReader::new(file).lines().count(),
                 file_path.to_str().unwrap(),
             );
         }
