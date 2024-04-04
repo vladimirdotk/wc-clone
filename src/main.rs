@@ -1,3 +1,5 @@
+use std::{fs::File, os::unix::fs::MetadataExt, path::Path};
+
 use clap::{Arg, ArgAction, ArgMatches, Command};
 
 enum CountMode {
@@ -9,8 +11,11 @@ enum CountMode {
 
 fn main() {
     let args = args();
-    let _ = count_mode(&args);
-    let _ = args.get_one::<String>("file").unwrap();
+    let count_mode = count_mode(&args);
+    let file_path = Path::new(args.get_one::<String>("file").unwrap());
+    if let CountMode::Bytes = count_mode {
+        count_bytes(file_path)
+    }
 }
 
 fn args() -> ArgMatches {
@@ -54,5 +59,20 @@ fn count_mode(args: &ArgMatches) -> CountMode {
         CountMode::Words
     } else {
         CountMode::All
+    }
+}
+
+fn count_bytes(file_path: &Path) {
+    match File::open(file_path) {
+        Ok(file) => {
+            println!(
+                "  {} {}",
+                file.metadata().unwrap().size(),
+                file_path.to_str().unwrap(),
+            );
+        }
+        Err(e) => {
+            println!("Failed to open file: {:?}", e);
+        }
     }
 }
