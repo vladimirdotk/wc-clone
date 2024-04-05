@@ -1,6 +1,7 @@
 use std::{
     fs::File,
     io::{self, BufRead, BufReader, Read, Stdin},
+    os::unix::fs::MetadataExt,
     path::Path,
 };
 
@@ -105,37 +106,56 @@ fn count_mode(args: &ArgMatches) -> CountMode {
 fn count(count_mode: CountMode, buf_reader: BufferReader, file_name: &str) -> String {
     match count_mode {
         CountMode::Bytes => {
-            let (bytes, _, _) = count_all(buf_reader).expect("Failed to count bytes");
+            let bytes = count_bytes(buf_reader).expect("Failed to count bytes");
             format!("  {} {}", bytes, file_name)
         }
-        CountMode::Lines => {
-            let (_, lines, _) = count_all(buf_reader).expect("Failed to count lines");
-            format!("  {} {}", lines, file_name)
-        }
-        CountMode::Words => {
-            let (_, _, words) = count_all(buf_reader).expect("Failed to count words");
-            format!("  {} {}", words, file_name)
-        }
-        CountMode::All => {
-            let (bytes, lines, words) = count_all(buf_reader).expect("Failed to count bytes");
-            format!("  {} {} {} {}", lines, words, bytes, file_name)
+        _ => {
+            let boxed_buff_reader: Box<dyn BufRead> = match buf_reader {
+                BufferReader::FileReader(reader) => Box::new(reader),
+                BufferReader::StdinReader(reader) => Box::new(reader),
+            };
+
+            match count_mode {
+                CountMode::Lines => {
+                    let (_, lines, _) =
+                        count_all(boxed_buff_reader).expect("Failed to count lines");
+                    format!("  {} {}", lines, file_name)
+                }
+                CountMode::Words => {
+                    let (_, _, words) =
+                        count_all(boxed_buff_reader).expect("Failed to count words");
+                    format!("  {} {}", words, file_name)
+                }
+                CountMode::All => {
+                    let (bytes, lines, words) =
+                        count_all(boxed_buff_reader).expect("Failed to count bytes");
+                    format!("  {} {} {} {}", lines, words, bytes, file_name)
+                }
+                _ => unreachable!(),
+            }
         }
     }
 }
 
-fn count_all(buf_reader: BufferReader) -> Result<(i64, usize, i32), io::Error> {
+fn count_bytes(buf_reader: BufferReader) -> Result<i64, io::Error> {
+    match buf_reader {
+        BufferReader::FileReader(reader) => Ok(reader.into_inner().metadata()?.size() as i64),
+        BufferReader::StdinReader(reader) => {
+            let (bytes, _, _) = count_all(Box::new(reader))?;
+
+            Ok(bytes)
+        }
+    }
+}
+
+fn count_all(buf_reader: Box<dyn BufRead>) -> Result<(i64, usize, i32), io::Error> {
     let mut bytes = 0;
     let mut lines = 0;
     let mut words = 0;
 
     let mut in_word = false;
 
-    let reader: Box<dyn BufRead> = match buf_reader {
-        BufferReader::FileReader(reader) => Box::new(reader),
-        BufferReader::StdinReader(reader) => Box::new(reader),
-    };
-
-    for byte in reader.bytes() {
+    for byte in buf_reader.bytes() {
         bytes += 1;
         match byte? {
             b @ (b' ' | b'\n' | b'\r' | b'\t') => {
