@@ -1,6 +1,6 @@
 use std::{
     fs::File,
-    io::{BufRead, BufReader, Read},
+    io::{self, BufRead, BufReader, Read},
     os::unix::fs::MetadataExt,
     path::Path,
 };
@@ -17,13 +17,15 @@ enum CountMode {
 fn main() {
     let args = args();
     let count_mode = count_mode(&args);
+
     let file_path = Path::new(args.get_one::<String>("file").unwrap());
-    match count_mode {
-        CountMode::Bytes => count_bytes(file_path),
-        CountMode::Lines => count_lines(file_path),
-        CountMode::Words => count_words(file_path),
-        _ => (),
-    }
+    let file_path_string = file_path
+        .to_str()
+        .expect("Error converting file path to utf-8 string");
+
+    let file = File::open(file_path).expect("Error open file");
+
+    count(count_mode, file_path_string, file);
 }
 
 fn args() -> ArgMatches {
@@ -70,60 +72,51 @@ fn count_mode(args: &ArgMatches) -> CountMode {
     }
 }
 
-fn count_bytes(file_path: &Path) {
-    match File::open(file_path) {
-        Ok(file) => {
-            println!(
-                "  {} {}",
-                file.metadata().unwrap().size(),
-                file_path.to_str().unwrap(),
-            );
+fn count(count_mode: CountMode, file_path: &str, file: File) {
+    match count_mode {
+        CountMode::Bytes => {
+            let bytes = file.metadata().expect("Error counting bytes").size();
+            println!("  {} {}", bytes, file_path);
         }
-        Err(e) => {
-            println!("Failed to open file: {:?}", e);
+        CountMode::Lines => {
+            let lines = BufReader::new(file).lines().count();
+            println!("  {} {}", lines, file_path)
         }
-    }
-}
-
-fn count_lines(file_path: &Path) {
-    match File::open(file_path) {
-        Ok(file) => {
-            println!(
-                "  {} {}",
-                BufReader::new(file).lines().count(),
-                file_path.to_str().unwrap(),
-            );
+        CountMode::Words => {
+            let (_, words) = count_lines_and_words(&file).expect("Error counting words");
+            println!("  {} {}", words, file_path)
         }
-        Err(e) => {
-            println!("Failed to open file: {:?}", e);
+        CountMode::All => {
+            let (lines, words) =
+                count_lines_and_words(&file).expect("Error counting words and lines");
+            let bytes = file.metadata().expect("Error counting bytes").size();
+            println!("  {} {} {} {}", lines, words, bytes, file_path);
         }
     }
 }
 
-fn count_words(file_path: &Path) {
-    match File::open(file_path) {
-        Ok(file) => {
-            let mut count = 0;
-            let mut in_word = false;
+fn count_lines_and_words(file: &File) -> Result<(usize, i32), io::Error> {
+    let mut lines = 0;
+    let mut words = 0;
 
-            for byte in BufReader::new(file).bytes() {
-                match byte.unwrap() {
-                    b' ' | b'\n' | b'\r' | b'\t' => {
-                        if in_word {
-                            count += 1;
-                            in_word = false;
-                        }
-                    }
-                    _ => {
-                        in_word = true;
-                    }
+    let mut in_word = false;
+
+    for byte in BufReader::new(file).bytes() {
+        match byte? {
+            b @ (b' ' | b'\n' | b'\r' | b'\t') => {
+                if in_word {
+                    words += 1;
+                    in_word = false;
+                }
+                if b == b'\n' {
+                    lines += 1;
                 }
             }
-
-            println!("  {} {}", count, file_path.to_str().unwrap(),);
-        }
-        Err(e) => {
-            println!("Failed to open file: {:?}", e);
+            _ => {
+                in_word = true;
+            }
         }
     }
+
+    Ok((lines, words))
 }
