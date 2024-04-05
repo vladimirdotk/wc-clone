@@ -1,7 +1,6 @@
 use std::{
     fs::File,
     io::{self, BufRead, BufReader, Read, Stdin},
-    os::unix::fs::MetadataExt,
     path::Path,
 };
 
@@ -139,7 +138,7 @@ fn count(count_mode: CountMode, buf_reader: BufferReader, file_name: &str) -> St
 
 fn count_bytes(buf_reader: BufferReader) -> Result<i64, io::Error> {
     match buf_reader {
-        BufferReader::FileReader(reader) => Ok(reader.into_inner().metadata()?.size() as i64),
+        BufferReader::FileReader(reader) => Ok(reader.into_inner().metadata()?.len() as i64),
         BufferReader::StdinReader(reader) => {
             let (bytes, _, _) = count_all(Box::new(reader))?;
 
