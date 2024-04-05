@@ -15,20 +15,30 @@ enum CountMode {
 }
 
 fn main() {
-    let args = args();
-    let count_mode = count_mode(&args);
-
-    let file_path = Path::new(args.get_one::<String>("file").unwrap());
-    let file_path_string = file_path
-        .to_str()
-        .expect("Error converting file path to utf-8 string");
-
-    let file = File::open(file_path).expect("Error open file");
-
-    count(count_mode, file_path_string, file);
+    let args = command().get_matches();
+    let result = run(args);
+    println!("{}", result);
 }
 
-fn args() -> ArgMatches {
+fn run(args: ArgMatches) -> String {
+    let count_mode = count_mode(&args);
+
+    let file_arg = args
+        .get_one::<String>("file")
+        .expect("Error getting file argument");
+    let file_path = Path::new(file_arg);
+    let file = File::open(file_path).expect("Error open file");
+
+    count(
+        count_mode,
+        file_path
+            .to_str()
+            .expect("Error converting file path to utf-8 string"),
+        file,
+    )
+}
+
+fn command() -> Command {
     Command::new("wc-clome")
         .version("0.1.0")
         .author("Vladimir K")
@@ -57,7 +67,6 @@ fn args() -> ArgMatches {
                 .required(true)
                 .index(1),
         )
-        .get_matches()
 }
 
 fn count_mode(args: &ArgMatches) -> CountMode {
@@ -72,25 +81,25 @@ fn count_mode(args: &ArgMatches) -> CountMode {
     }
 }
 
-fn count(count_mode: CountMode, file_path: &str, file: File) {
+fn count(count_mode: CountMode, file_path: &str, file: File) -> String {
     match count_mode {
         CountMode::Bytes => {
             let bytes = file.metadata().expect("Error counting bytes").size();
-            println!("  {} {}", bytes, file_path);
+            format!("  {} {}", bytes, file_path)
         }
         CountMode::Lines => {
             let lines = BufReader::new(file).lines().count();
-            println!("  {} {}", lines, file_path)
+            format!("  {} {}", lines, file_path)
         }
         CountMode::Words => {
             let (_, words) = count_lines_and_words(&file).expect("Error counting words");
-            println!("  {} {}", words, file_path)
+            format!("  {} {}", words, file_path)
         }
         CountMode::All => {
             let (lines, words) =
                 count_lines_and_words(&file).expect("Error counting words and lines");
             let bytes = file.metadata().expect("Error counting bytes").size();
-            println!("  {} {} {} {}", lines, words, bytes, file_path);
+            format!("  {} {} {} {}", lines, words, bytes, file_path)
         }
     }
 }
@@ -119,4 +128,41 @@ fn count_lines_and_words(file: &File) -> Result<(usize, i32), io::Error> {
     }
 
     Ok((lines, words))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn count_bytes() {
+        let args = vec!["wc-clone", "-c", "src/test.txt"];
+        let args = command().get_matches_from(args);
+        let result = run(args);
+        assert_eq!("  342190 src/test.txt", result);
+    }
+
+    #[test]
+    fn count_lines() {
+        let args = vec!["wc-clone", "-l", "src/test.txt"];
+        let args = command().get_matches_from(args);
+        let result = run(args);
+        assert_eq!("  7145 src/test.txt", result);
+    }
+
+    #[test]
+    fn count_words() {
+        let args = vec!["wc-clone", "-w", "src/test.txt"];
+        let args = command().get_matches_from(args);
+        let result = run(args);
+        assert_eq!("  58164 src/test.txt", result);
+    }
+
+    #[test]
+    fn count_all() {
+        let args = vec!["wc-clone", "src/test.txt"];
+        let args = command().get_matches_from(args);
+        let result = run(args);
+        assert_eq!("  7145 58164 342190 src/test.txt", result);
+    }
 }
