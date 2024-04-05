@@ -1,17 +1,24 @@
 use std::{
     fs::File,
-    io::{self, BufRead, BufReader, Read},
-    os::unix::fs::MetadataExt,
+    io::{self, BufRead, BufReader, Read, Stdin},
     path::Path,
 };
 
 use clap::{Arg, ArgAction, ArgMatches, Command};
+
+#[cfg(target_family = "unix")]
+use libc::{self, STDIN_FILENO};
 
 enum CountMode {
     Bytes,
     Lines,
     Words,
     All,
+}
+
+enum BufferReader {
+    FileReader(BufReader<File>),
+    StdinReader(BufReader<Stdin>),
 }
 
 fn main() {
@@ -22,19 +29,33 @@ fn main() {
 
 fn run(args: ArgMatches) -> String {
     let count_mode = count_mode(&args);
+    match is_piped() {
+        true => run_pipe(count_mode),
+        false => run_file(args, count_mode),
+    }
+}
 
+fn run_pipe(count_mode: CountMode) -> String {
+    let buf_reader = BufferReader::StdinReader(BufReader::new(io::stdin()));
+
+    count(count_mode, buf_reader, "")
+}
+
+fn run_file(args: ArgMatches, count_mode: CountMode) -> String {
     let file_arg = args
         .get_one::<String>("file")
         .expect("Error getting file argument");
     let file_path = Path::new(file_arg);
     let file = File::open(file_path).expect("Error open file");
 
+    let buf_reader = BufferReader::FileReader(BufReader::new(file));
+
     count(
         count_mode,
+        buf_reader,
         file_path
             .to_str()
             .expect("Error converting file path to utf-8 string"),
-        file,
     )
 }
 
@@ -64,7 +85,7 @@ fn command() -> Command {
         .arg(
             Arg::new("file")
                 .help("File to process")
-                .required(true)
+                .required(false)
                 .index(1),
         )
 }
@@ -81,36 +102,41 @@ fn count_mode(args: &ArgMatches) -> CountMode {
     }
 }
 
-fn count(count_mode: CountMode, file_path: &str, file: File) -> String {
+fn count(count_mode: CountMode, buf_reader: BufferReader, file_name: &str) -> String {
     match count_mode {
         CountMode::Bytes => {
-            let bytes = file.metadata().expect("Error counting bytes").size();
-            format!("  {} {}", bytes, file_path)
+            let (bytes, _, _) = count_all(buf_reader).expect("Failed to count bytes");
+            format!("  {} {}", bytes, file_name)
         }
         CountMode::Lines => {
-            let lines = BufReader::new(file).lines().count();
-            format!("  {} {}", lines, file_path)
+            let (_, lines, _) = count_all(buf_reader).expect("Failed to count lines");
+            format!("  {} {}", lines, file_name)
         }
         CountMode::Words => {
-            let (_, words) = count_lines_and_words(&file).expect("Error counting words");
-            format!("  {} {}", words, file_path)
+            let (_, _, words) = count_all(buf_reader).expect("Failed to count words");
+            format!("  {} {}", words, file_name)
         }
         CountMode::All => {
-            let (lines, words) =
-                count_lines_and_words(&file).expect("Error counting words and lines");
-            let bytes = file.metadata().expect("Error counting bytes").size();
-            format!("  {} {} {} {}", lines, words, bytes, file_path)
+            let (bytes, lines, words) = count_all(buf_reader).expect("Failed to count bytes");
+            format!("  {} {} {} {}", lines, words, bytes, file_name)
         }
     }
 }
 
-fn count_lines_and_words(file: &File) -> Result<(usize, i32), io::Error> {
+fn count_all(buf_reader: BufferReader) -> Result<(i64, usize, i32), io::Error> {
+    let mut bytes = 0;
     let mut lines = 0;
     let mut words = 0;
 
     let mut in_word = false;
 
-    for byte in BufReader::new(file).bytes() {
+    let reader: Box<dyn BufRead> = match buf_reader {
+        BufferReader::FileReader(reader) => Box::new(reader),
+        BufferReader::StdinReader(reader) => Box::new(reader),
+    };
+
+    for byte in reader.bytes() {
+        bytes += 1;
         match byte? {
             b @ (b' ' | b'\n' | b'\r' | b'\t') => {
                 if in_word {
@@ -127,7 +153,18 @@ fn count_lines_and_words(file: &File) -> Result<(usize, i32), io::Error> {
         }
     }
 
-    Ok((lines, words))
+    Ok((bytes, lines, words))
+}
+
+fn is_piped() -> bool {
+    #[cfg(target_family = "unix")]
+    unsafe {
+        if libc::isatty(STDIN_FILENO) == 0 {
+            return true;
+        }
+    }
+
+    false
 }
 
 #[cfg(test)]
