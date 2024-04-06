@@ -60,7 +60,7 @@ fn run_file(args: ArgMatches, count_mode: CountMode) -> String {
 }
 
 fn command() -> Command {
-    Command::new("wc-clome")
+    Command::new("wc-clone")
         .version("0.1.0")
         .author("Vladimir K")
         .about("Count bytes, lines, words")
